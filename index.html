@@ -22,6 +22,7 @@
   .overlay h1 { font-size: clamp(28px, 9vw, 52px); margin-bottom: 8px; letter-spacing: 1px;
     text-shadow: 0 0 18px rgba(180,80,255,0.7); color: #e9d5ff; }
   .overlay p { font-size: clamp(14px, 4vw, 18px); color: #b7a9c9; margin-bottom: 6px; line-height: 1.6; }
+  .best { margin-top: 6px; color: #fde68a; font-weight: 700; }
   .btn {
     margin-top: 22px; padding: 16px 40px; font-size: 20px; font-weight: 700;
     color: #fff; background: linear-gradient(180deg, #9333ea, #6b21a8);
@@ -30,7 +31,6 @@
   }
   .btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #4c1273; }
 
-  /* HUD */
   #hud { position: absolute; top: 0; left: 0; right: 0; z-index: 10; pointer-events: none; padding: env(safe-area-inset-top) 10px 0; }
   #xpbar { height: 14px; background: rgba(255,255,255,.12); border-radius: 8px; overflow: hidden; margin-top: 8px; }
   #xpfill { height: 100%; width: 0%; background: linear-gradient(90deg,#38bdf8,#22d3ee); transition: width .12s linear; }
@@ -40,7 +40,6 @@
   #timer { font-size: 20px; font-variant-numeric: tabular-nums; }
   #kills { color: #fca5a5; }
 
-  /* Level up cards */
   #levelup { z-index: 25; }
   #levelup h1 { color: #fde68a; text-shadow: 0 0 18px rgba(255,200,60,.7); font-size: clamp(24px,7vw,40px); }
   .cards { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 420px; margin-top: 18px; }
@@ -50,13 +49,14 @@
     background: linear-gradient(180deg, rgba(60,40,90,.95), rgba(30,20,50,.95));
     border: 2px solid rgba(160,120,220,.4); box-shadow: 0 6px 18px rgba(0,0,0,.5);
   }
+  .card.evo { border-color: #fbbf24; background: linear-gradient(180deg, rgba(120,80,20,.95), rgba(60,40,10,.95)); }
   .card:active { transform: scale(.97); border-color: #c084fc; }
   .card .ico { font-size: 34px; width: 46px; text-align: center; flex-shrink: 0; }
   .card .txt h3 { font-size: 17px; color: #f5f3ff; margin-bottom: 3px; }
   .card .txt p { font-size: 13px; color: #b7a9c9; margin: 0; }
   .card .lv { margin-left: auto; font-size: 12px; color: #fde68a; font-weight: 700; flex-shrink: 0; }
+  .card.evo .lv { color: #fbbf24; }
 
-  /* Joystick */
   #stick { position: absolute; z-index: 15; width: 130px; height: 130px; border-radius: 50%;
     background: rgba(255,255,255,.07); border: 2px solid rgba(255,255,255,.18); display: none; }
   #knob { position: absolute; width: 58px; height: 58px; border-radius: 50%; left: 36px; top: 36px;
@@ -83,7 +83,8 @@
 <div class="overlay" id="start">
   <h1>뱀파이어 서바이벌</h1>
   <p>몰려오는 적을 피하며 최대한 오래 살아남으세요.</p>
-  <p>무기는 <b>자동</b>으로 공격합니다.<br>이동만 신경 쓰면 돼요!</p>
+  <p>무기는 <b>자동</b>으로 공격합니다. 이동만 신경 쓰면 돼요!</p>
+  <p class="best" id="bestStart"></p>
   <p style="margin-top:10px;color:#8a7ca0">📱 화면을 손가락으로 드래그해 이동</p>
   <button class="btn" id="startBtn">게임 시작</button>
 </div>
@@ -97,6 +98,7 @@
 <div class="overlay hidden" id="gameover">
   <h1 style="color:#fca5a5;text-shadow:0 0 18px rgba(255,80,80,.6)">게임 오버</h1>
   <p id="goStats"></p>
+  <p class="best" id="bestGO"></p>
   <button class="btn" id="retryBtn" style="background:linear-gradient(180deg,#ef4444,#b91c1c);box-shadow:0 6px 0 #7f1d1d,0 10px 22px rgba(0,0,0,.5)">다시 하기</button>
 </div>
 
@@ -116,78 +118,98 @@
   window.addEventListener('resize', resize);
   resize();
 
-  // ---------- Game state ----------
   const rand = (a, b) => a + Math.random() * (b - a);
   const dist2 = (ax, ay, bx, by) => { const dx = ax - bx, dy = ay - by; return dx*dx + dy*dy; };
 
-  let state = 'menu'; // menu, play, levelup, dead
+  // ---------- High score ----------
+  const BEST_KEY = 'vs_best_v1';
+  function getBest() { const v = parseFloat(localStorage.getItem(BEST_KEY)); return isNaN(v) ? 0 : v; }
+  function setBest(v) { try { localStorage.setItem(BEST_KEY, String(v)); } catch(e) {} }
+  function fmtTime(t) { const m = Math.floor(t/60), s = Math.floor(t%60); return m + ':' + String(s).padStart(2,'0'); }
+
+  let state = 'menu';
   let time = 0, kills = 0;
   const cam = { x: 0, y: 0 };
 
   const player = {
     x: 0, y: 0, r: 16, speed: 190, hp: 100, maxhp: 100,
-    level: 1, xp: 0, xpNeed: 5, pickup: 70, iframe: 0, regen: 0,
-    weapons: {}, // id -> level
-    stats: { dmg: 1, atkspeed: 1, movespeed: 1, area: 1, magnet: 1 }
+    level: 1, xp: 0, xpNeed: 4, pickup: 80, iframe: 0, regen: 0, facing: 1,
+    weapons: {}, _passives: {},
+    stats: { dmg: 1, atkspeed: 1, movespeed: 1, area: 1 }
   };
 
   let enemies = [], bullets = [], gems = [], particles = [], damageTexts = [];
+  let lightnings = [], slashes = [];
   const weaponTimers = {};
+  let orbitAng = 0;
+  let banner = null; // {txt, life}
 
-  // ---------- Weapon / upgrade definitions ----------
+  // ---------- Weapons ----------
+  const WMAX = 6; // 최대 레벨 = 진화
   const WEAPONS = {
-    knife: { name: '단검', icon: '🔪', desc: '가까운 적에게 단검을 던집니다', max: 8 },
-    aura:  { name: '마늘 오라', icon: '🧄', desc: '주변 적에게 지속 피해를 줍니다', max: 8 },
-    orbit: { name: '성서', icon: '📖', desc: '몸 주위를 회전하며 적을 칩니다', max: 8 },
-    bolt:  { name: '번개', icon: '⚡', desc: '무작위 적에게 번개를 내리칩니다', max: 8 },
+    knife: { name: '단검', icon: '🔪', desc: '가까운 적에게 단검을 던집니다', evo: '천 개의 칼날', evoDesc: '사방으로 칼날을 퍼붓습니다' },
+    axe:   { name: '도끼', icon: '🪓', desc: '위로 던져 관통하는 무거운 도끼', evo: '죽음의 나선', evoDesc: '거대한 도끼가 폭풍처럼 날아갑니다' },
+    whip:  { name: '채찍', icon: '〰️', desc: '바라보는 방향을 후려칩니다', evo: '핏빛 채찍', evoDesc: '양옆을 강타하고 피를 흡수합니다' },
+    aura:  { name: '마늘 오라', icon: '🧄', desc: '주변 적에게 지속 피해를 줍니다', evo: '영혼 포식자', evoDesc: '범위가 넓어지고 처치 시 회복' },
+    orbit: { name: '성서', icon: '📖', desc: '몸 주위를 회전하며 적을 칩니다', evo: '천국의 검', evoDesc: '더 많고 빠르게 회전합니다' },
+    bolt:  { name: '번개', icon: '⚡', desc: '무작위 적에게 번개를 내리칩니다', evo: '뇌신', evoDesc: '여러 갈래로 연쇄 낙뢰' },
+    frost: { name: '서리', icon: '❄️', desc: '적을 느리게 하는 얼음 구체', evo: '절대영도', evoDesc: '주변을 얼려버립니다' },
   };
   const PASSIVES = {
-    might:   { name: '힘', icon: '💪', desc: '피해량 +15%', max: 6, apply: () => player.stats.dmg += 0.15 },
-    haste:   { name: '신속', icon: '⏱️', desc: '공격 속도 +12%', max: 6, apply: () => player.stats.atkspeed += 0.12 },
-    boots:   { name: '날개', icon: '🪽', desc: '이동 속도 +12%', max: 5, apply: () => player.stats.movespeed += 0.12 },
-    heart:   { name: '생명력', icon: '❤️', desc: '최대 체력 +25, 회복', max: 6, apply: () => { player.maxhp += 25; player.hp = Math.min(player.maxhp, player.hp + 40); } },
-    magnet:  { name: '자석', icon: '🧲', desc: '경험치 획득 범위 +40%', max: 4, apply: () => { player.pickup += 40; } },
-    regen:   { name: '재생', icon: '💚', desc: '초당 체력 회복 +1', max: 5, apply: () => player.regen += 1 },
-    area:    { name: '확장', icon: '🌀', desc: '공격 범위 +15%', max: 5, apply: () => player.stats.area += 0.15 },
+    might:  { name: '힘', icon: '💪', desc: '피해량 +15%', max: 6, apply: () => player.stats.dmg += 0.15 },
+    haste:  { name: '신속', icon: '⏱️', desc: '공격 속도 +12%', max: 6, apply: () => player.stats.atkspeed += 0.12 },
+    boots:  { name: '날개', icon: '🪽', desc: '이동 속도 +12%', max: 5, apply: () => player.stats.movespeed += 0.12 },
+    heart:  { name: '생명력', icon: '❤️', desc: '최대 체력 +25, 회복', max: 6, apply: () => { player.maxhp += 25; player.hp = Math.min(player.maxhp, player.hp + 40); } },
+    magnet: { name: '자석', icon: '🧲', desc: '경험치 획득 범위 +40%', max: 4, apply: () => { player.pickup += 40; } },
+    regen:  { name: '재생', icon: '💚', desc: '초당 체력 회복 +1', max: 5, apply: () => player.regen += 1 },
+    area:   { name: '확장', icon: '🌀', desc: '공격 범위 +15%', max: 5, apply: () => player.stats.area += 0.15 },
   };
 
-  function weaponLevel(id) { return player.weapons[id] || 0; }
+  const weaponLevel = id => player.weapons[id] || 0;
+  const isEvo = id => weaponLevel(id) >= WMAX;
 
   function upgradeChoices() {
     const pool = [];
-    // owned weapons that can level up
     for (const id in WEAPONS) {
       const lv = weaponLevel(id);
-      if (lv > 0 && lv < WEAPONS[id].max)
-        pool.push({ type: 'weapon', id, icon: WEAPONS[id].icon, name: WEAPONS[id].name, desc: WEAPONS[id].desc, lv });
-    }
-    // new weapons (limit total weapons to 5)
-    const owned = Object.keys(player.weapons).length;
-    if (owned < 5) {
-      for (const id in WEAPONS) {
-        if (!weaponLevel(id))
-          pool.push({ type: 'weapon', id, icon: WEAPONS[id].icon, name: WEAPONS[id].name, desc: WEAPONS[id].desc + ' (신규)', lv: 0 });
+      if (lv > 0 && lv < WMAX) {
+        const evolving = lv + 1 >= WMAX;
+        pool.push({ type: 'weapon', id, lv, evo: evolving,
+          icon: evolving ? '✨' : WEAPONS[id].icon,
+          name: evolving ? WEAPONS[id].evo : WEAPONS[id].name,
+          desc: evolving ? '진화! ' + WEAPONS[id].evoDesc : WEAPONS[id].desc });
       }
     }
-    // passives
-    for (const id in PASSIVES) {
-      const lv = player._passives?.[id] || 0;
-      if (lv < PASSIVES[id].max)
-        pool.push({ type: 'passive', id, icon: PASSIVES[id].icon, name: PASSIVES[id].name, desc: PASSIVES[id].desc, lv });
+    const owned = Object.keys(player.weapons).length;
+    if (owned < 6) {
+      for (const id in WEAPONS) {
+        if (!weaponLevel(id))
+          pool.push({ type: 'weapon', id, lv: 0, evo: false, icon: WEAPONS[id].icon, name: WEAPONS[id].name, desc: WEAPONS[id].desc + ' (신규)' });
+      }
     }
-    // shuffle & pick 3
-    for (let i = pool.length - 1; i > 0; i--) { const j = (Math.random() * (i+1))|0; [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    for (const id in PASSIVES) {
+      const lv = player._passives[id] || 0;
+      if (lv < PASSIVES[id].max)
+        pool.push({ type: 'passive', id, lv, evo: false, icon: PASSIVES[id].icon, name: PASSIVES[id].name, desc: PASSIVES[id].desc });
+    }
+    for (let i = pool.length - 1; i > 0; i--) { const j = (Math.random()*(i+1))|0; [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    // 진화 선택지는 앞으로 당겨 노출
+    pool.sort((a,b) => (b.evo?1:0) - (a.evo?1:0));
     const picks = pool.slice(0, 3);
-    if (picks.length === 0) picks.push({ type: 'heal', icon: '🍗', name: '회복', desc: '체력을 완전히 회복합니다', lv: 0 });
+    if (picks.length === 0) picks.push({ type: 'heal', icon: '🍗', name: '회복', desc: '체력을 완전히 회복합니다', lv: 0, evo: false });
     return picks;
   }
 
   function applyChoice(c) {
     if (c.type === 'weapon') {
-      player.weapons[c.id] = weaponLevel(c.id) + 1;
-      if (!weaponTimers[c.id]) weaponTimers[c.id] = 0;
+      const before = weaponLevel(c.id);
+      player.weapons[c.id] = before + 1;
+      if (!(c.id in weaponTimers)) weaponTimers[c.id] = 0;
+      if (player.weapons[c.id] >= WMAX && before < WMAX) {
+        banner = { txt: WEAPONS[c.id].evo + ' 진화!', life: 2.2 };
+        for (let p = 0; p < 30; p++) particles.push({ x: player.x, y: player.y, vx: rand(-260,260), vy: rand(-260,260), life: .7, r: rand(2,5), color: '#fbbf24' });
+      }
     } else if (c.type === 'passive') {
-      player._passives = player._passives || {};
       player._passives[c.id] = (player._passives[c.id] || 0) + 1;
       PASSIVES[c.id].apply();
     } else if (c.type === 'heal') {
@@ -195,18 +217,18 @@
     }
   }
 
-  // ---------- Setup / reset ----------
   function reset() {
     time = 0; kills = 0;
     player.x = 0; player.y = 0; player.r = 16; player.speed = 190;
-    player.maxhp = 100; player.hp = 100; player.level = 1; player.xp = 0; player.xpNeed = 5;
-    player.pickup = 70; player.iframe = 0; player.regen = 0;
-    player.weapons = { knife: 1 };
-    player._passives = {};
-    player.stats = { dmg: 1, atkspeed: 1, movespeed: 1, area: 1, magnet: 1 };
+    player.maxhp = 100; player.hp = 100; player.level = 1; player.xp = 0; player.xpNeed = 4;
+    player.pickup = 80; player.iframe = 0; player.regen = 0; player.facing = 1;
+    player.weapons = { knife: 1 }; player._passives = {};
+    player.stats = { dmg: 1, atkspeed: 1, movespeed: 1, area: 1 };
     enemies = []; bullets = []; gems = []; particles = []; damageTexts = [];
+    lightnings = []; slashes = [];
     for (const k in weaponTimers) delete weaponTimers[k];
     weaponTimers.knife = 0;
+    orbitAng = 0; banner = null; spawnAcc = 0;
     cam.x = 0; cam.y = 0;
   }
 
@@ -215,176 +237,242 @@
     { r: 13, hp: 8,  speed: 55, dmg: 6,  color: '#7ec850', xp: 1, min: 0 },
     { r: 15, hp: 20, speed: 48, dmg: 9,  color: '#e0794a', xp: 2, min: 60 },
     { r: 11, hp: 12, speed: 85, dmg: 7,  color: '#5ac8e0', xp: 2, min: 120 },
-    { r: 22, hp: 70, speed: 38, dmg: 16, color: '#b05ae0', xp: 5, min: 180 },
+    { r: 22, hp: 70, speed: 38, dmg: 16, color: '#b05ae0', xp: 6, min: 180 },
     { r: 14, hp: 40, speed: 60, dmg: 12, color: '#e05a7a', xp: 3, min: 240 },
   ];
-
   function spawnEnemy() {
     const avail = ENEMY_TYPES.filter(t => time >= t.min);
-    const t = avail[(Math.random() * avail.length) | 0];
-    // spawn just off-screen around player
-    const ang = Math.random() * Math.PI * 2;
+    const t = avail[(Math.random()*avail.length)|0];
+    const ang = Math.random()*Math.PI*2;
     const radius = Math.max(W, H) * 0.62 + 40;
-    const hpScale = 1 + time / 90; // enemies get tankier over time
+    const hpScale = 1 + time / 90;
     enemies.push({
-      x: player.x + Math.cos(ang) * radius,
-      y: player.y + Math.sin(ang) * radius,
-      r: t.r, hp: t.hp * hpScale, maxhp: t.hp * hpScale,
-      speed: t.speed, dmg: t.dmg, color: t.color, xp: t.xp, hitFlash: 0
+      x: player.x + Math.cos(ang)*radius, y: player.y + Math.sin(ang)*radius,
+      r: t.r, hp: t.hp*hpScale, maxhp: t.hp*hpScale,
+      speed: t.speed, dmg: t.dmg, color: t.color, xp: t.xp, hitFlash: 0, slowT: 0, _orbitCd: 0, _auraCd: 0
     });
   }
-
   let spawnAcc = 0;
-  function spawnRate() { return 1.1 + time * 0.045; } // enemies per second, ramps up
+  const spawnRate = () => 1.1 + time * 0.045;
 
-  // ---------- Weapons firing ----------
-  function nearestEnemy(x, y, maxD) {
-    let best = null, bd = maxD ? maxD*maxD : Infinity;
+  function nearestEnemy(x, y) {
+    let best = null, bd = Infinity;
     for (const e of enemies) { const d = dist2(x, y, e.x, e.y); if (d < bd) { bd = d; best = e; } }
     return best;
   }
 
-  function fireWeapons(dt) {
-    const as = player.stats.atkspeed;
-    // Knife
-    if (weaponLevel('knife')) {
-      const lv = weaponLevel('knife');
-      weaponTimers.knife -= dt;
-      if (weaponTimers.knife <= 0) {
-        weaponTimers.knife = 0.85 / as;
-        const count = 1 + Math.floor(lv / 2);
-        const target = nearestEnemy(player.x, player.y);
-        let baseAng = target ? Math.atan2(target.y - player.y, target.x - player.x) : lastMoveAng;
-        for (let i = 0; i < count; i++) {
-          const spread = (i - (count-1)/2) * 0.18;
-          const a = baseAng + spread;
-          bullets.push({ x: player.x, y: player.y, vx: Math.cos(a)*430, vy: Math.sin(a)*430,
-            r: 6, dmg: (7 + lv*3) * player.stats.dmg, life: 1.1, pierce: 1 + Math.floor(lv/3), hits: [], color: '#e5e7eb', kind: 'knife' });
-        }
-      }
-    }
-    // Bolt (lightning)
-    if (weaponLevel('bolt')) {
-      const lv = weaponLevel('bolt');
-      weaponTimers.bolt = (weaponTimers.bolt || 0) - dt;
-      if (weaponTimers.bolt <= 0) {
-        weaponTimers.bolt = 1.6 / as;
-        const strikes = 1 + Math.floor(lv/2);
-        for (let s = 0; s < strikes; s++) {
-          if (!enemies.length) break;
-          const e = enemies[(Math.random()*enemies.length)|0];
-          const dmg = (14 + lv*6) * player.stats.dmg;
-          e.hp -= dmg; e.hitFlash = 0.1; addDamage(e.x, e.y, dmg);
-          for (let p = 0; p < 8; p++) particles.push({ x: e.x, y: e.y, vx: rand(-90,90), vy: rand(-90,90), life: .3, r: rand(1,3), color: '#a5f3fc' });
-          if (e.hp <= 0) killEnemy(e);
-        }
-      }
-    }
+  function damageEnemy(e, dmg, opts) {
+    e.hp -= dmg; e.hitFlash = 0.1; addDamage(e.x, e.y, dmg, opts && opts.color);
+    if (opts && opts.slow) e.slowT = opts.slow;
+    if (e.hp <= 0) killEnemy(e);
   }
 
-  // continuous weapons handled in update: aura, orbit
-  function updateContinuousWeapons(dt) {
-    // Aura (garlic)
-    if (weaponLevel('aura')) {
-      const lv = weaponLevel('aura');
-      const range = (55 + lv*14) * player.stats.area;
-      const dps = (10 + lv*5) * player.stats.dmg;
-      for (const e of enemies) {
-        if (dist2(player.x, player.y, e.x, e.y) < range*range) {
-          e.hp -= dps * dt; e.hitFlash = 0.05;
-          // knockback slightly
-          const a = Math.atan2(e.y - player.y, e.x - player.x);
-          e.x += Math.cos(a) * 12 * dt; e.y += Math.sin(a) * 12 * dt;
-          if (e.hp <= 0) killEnemy(e);
+  // ---------- Weapons firing ----------
+  function fireWeapons(dt) {
+    const as = player.stats.atkspeed, dm = player.stats.dmg, ar = player.stats.area;
+
+    // 단검 / 천 개의 칼날
+    if (weaponLevel('knife')) {
+      const lv = weaponLevel('knife'), evo = isEvo('knife');
+      weaponTimers.knife -= dt;
+      if (weaponTimers.knife <= 0) {
+        weaponTimers.knife = (evo ? 0.32 : 0.85) / as;
+        const count = evo ? 8 : 1 + Math.floor(lv/2);
+        const target = nearestEnemy(player.x, player.y);
+        let baseAng = evo ? Math.random()*Math.PI*2 : (target ? Math.atan2(target.y-player.y, target.x-player.x) : (player.facing>0?0:Math.PI));
+        for (let i = 0; i < count; i++) {
+          const a = evo ? (i/count)*Math.PI*2 : baseAng + (i-(count-1)/2)*0.18;
+          bullets.push({ x: player.x, y: player.y, vx: Math.cos(a)*440, vy: Math.sin(a)*440,
+            r: 6, dmg: (7+lv*3)*dm, life: 1.1, pierce: evo ? 3 : 1+Math.floor(lv/3), hits: [], color: '#e5e7eb', kind: 'knife', spin: a });
         }
       }
     }
-    // Orbit (bible)
-    if (weaponLevel('orbit')) {
-      const lv = weaponLevel('orbit');
-      const count = 1 + Math.floor((lv+1)/2);
-      const radius = (70 + lv*6) * player.stats.area;
-      const dmg = (9 + lv*4) * player.stats.dmg;
-      orbitAng += dt * 3.2;
-      for (let i = 0; i < count; i++) {
-        const a = orbitAng + (i / count) * Math.PI * 2;
-        const ox = player.x + Math.cos(a)*radius, oy = player.y + Math.sin(a)*radius;
-        for (const e of enemies) {
-          if (dist2(ox, oy, e.x, e.y) < (e.r + 14)*(e.r + 14)) {
-            if (!e._orbitCd || e._orbitCd <= 0) {
-              e.hp -= dmg; e.hitFlash = 0.1; e._orbitCd = 0.35; addDamage(e.x, e.y, dmg);
-              const ka = Math.atan2(e.y - player.y, e.x - player.x);
-              e.x += Math.cos(ka)*10; e.y += Math.sin(ka)*10;
-              if (e.hp <= 0) killEnemy(e);
+
+    // 도끼 / 죽음의 나선
+    if (weaponLevel('axe')) {
+      const lv = weaponLevel('axe'), evo = isEvo('axe');
+      weaponTimers.axe = (weaponTimers.axe||0) - dt;
+      if (weaponTimers.axe <= 0) {
+        weaponTimers.axe = (evo ? 0.7 : 1.25) / as;
+        const count = evo ? 4 : 1 + Math.floor(lv/2);
+        for (let i = 0; i < count; i++) {
+          const dir = (i%2===0?1:-1) * (player.facing>0?1:-1);
+          bullets.push({ x: player.x, y: player.y, vx: rand(40,120)*dir, vy: -rand(340,420),
+            r: evo ? 16 : 11, dmg: (16+lv*7)*dm, life: 2.2, pierce: evo ? 99 : 3+lv, hits: [],
+            color: '#cbd5e1', kind: 'axe', grav: 620, spin: 0, spinv: rand(9,13)*dir });
+        }
+      }
+    }
+
+    // 채찍 / 핏빛 채찍
+    if (weaponLevel('whip')) {
+      const lv = weaponLevel('whip'), evo = isEvo('whip');
+      weaponTimers.whip = (weaponTimers.whip||0) - dt;
+      if (weaponTimers.whip <= 0) {
+        weaponTimers.whip = (evo ? 0.7 : 1.0) / as;
+        const wlen = (150 + lv*18) * ar, wh = (66 + lv*6) * ar;
+        const dmg = (12 + lv*6) * dm;
+        const dirs = evo || lv >= 4 ? [1, -1] : [player.facing];
+        for (const dir of dirs) {
+          slashes.push({ x: player.x, y: player.y, dir, len: wlen, h: wh, life: 0.18, evo });
+          for (const e of enemies) {
+            const rx = (e.x - player.x) * dir;
+            if (rx > -10 && rx < wlen && Math.abs(e.y - player.y) < wh/2 + e.r) {
+              damageEnemy(e, dmg, { color: evo ? '#fca5a5' : '#fff' });
+              if (evo && player.hp < player.maxhp && Math.random() < 0.5) player.hp = Math.min(player.maxhp, player.hp + 1);
             }
           }
         }
       }
     }
-    for (const e of enemies) if (e._orbitCd) e._orbitCd -= dt;
+
+    // 서리 / 절대영도
+    if (weaponLevel('frost')) {
+      const lv = weaponLevel('frost'), evo = isEvo('frost');
+      weaponTimers.frost = (weaponTimers.frost||0) - dt;
+      if (weaponTimers.frost <= 0) {
+        if (evo) {
+          weaponTimers.frost = 2.4 / as;
+          // 주변을 얼림
+          const range = 240 * ar;
+          for (const e of enemies) {
+            if (dist2(player.x, player.y, e.x, e.y) < range*range) damageEnemy(e, (18+lv*6)*dm, { slow: 2.2, color: '#a5f3fc' });
+          }
+          for (let p = 0; p < 24; p++) particles.push({ x: player.x, y: player.y, vx: rand(-220,220), vy: rand(-220,220), life: .6, r: rand(2,4), color: '#bae6fd' });
+        } else {
+          weaponTimers.frost = 1.4 / as;
+          const count = 1 + Math.floor(lv/2);
+          const target = nearestEnemy(player.x, player.y);
+          let base = target ? Math.atan2(target.y-player.y, target.x-player.x) : Math.random()*Math.PI*2;
+          for (let i = 0; i < count; i++) {
+            const a = base + (i-(count-1)/2)*0.4;
+            bullets.push({ x: player.x, y: player.y, vx: Math.cos(a)*300, vy: Math.sin(a)*300,
+              r: 9, dmg: (8+lv*4)*dm, life: 1.6, pierce: 2+lv, hits: [], color: '#7dd3fc', kind: 'frost', slow: 1.4, spin: 0 });
+          }
+        }
+      }
+    }
+
+    // 번개 / 뇌신
+    if (weaponLevel('bolt')) {
+      const lv = weaponLevel('bolt'), evo = isEvo('bolt');
+      weaponTimers.bolt = (weaponTimers.bolt||0) - dt;
+      if (weaponTimers.bolt <= 0) {
+        weaponTimers.bolt = (evo ? 1.0 : 1.6) / as;
+        const strikes = (evo ? 3 : 1) + Math.floor(lv/2);
+        for (let s = 0; s < strikes; s++) {
+          if (!enemies.length) break;
+          const e = enemies[(Math.random()*enemies.length)|0];
+          const dmg = (14+lv*6)*dm;
+          damageEnemy(e, dmg, { color: '#a5f3fc' });
+          lightnings.push({ x: e.x, y: e.y, life: 0.28 });
+          for (let p = 0; p < 10; p++) particles.push({ x: e.x, y: e.y, vx: rand(-120,120), vy: rand(-120,120), life: .35, r: rand(1,3), color: '#a5f3fc' });
+          if (evo) { // 근처로 연쇄
+            const near = nearestEnemyExcept(e.x, e.y, e, 140);
+            if (near) { damageEnemy(near, dmg*0.7, { color: '#a5f3fc' }); lightnings.push({ x: near.x, y: near.y, sx: e.x, sy: e.y, life: 0.24 }); }
+          }
+        }
+      }
+    }
   }
-  let orbitAng = 0;
+  function nearestEnemyExcept(x, y, ex, maxD) {
+    let best = null, bd = maxD*maxD;
+    for (const e of enemies) { if (e === ex) continue; const d = dist2(x, y, e.x, e.y); if (d < bd) { bd = d; best = e; } }
+    return best;
+  }
+
+  function updateContinuousWeapons(dt) {
+    // 마늘 오라 / 영혼 포식자 — 0.25초마다 데미지 숫자 표시
+    if (weaponLevel('aura')) {
+      const lv = weaponLevel('aura'), evo = isEvo('aura');
+      const range = ((evo ? 90 : 55) + lv*14) * player.stats.area;
+      const tick = 0.25;
+      const hit = (evo ? 5 : 3.2) * (10 + lv*5) * player.stats.dmg * tick; // 틱당 데미지
+      for (const e of enemies) {
+        if (dist2(player.x, player.y, e.x, e.y) < range*range) {
+          e._auraCd -= dt;
+          const a = Math.atan2(e.y-player.y, e.x-player.x);
+          e.x += Math.cos(a)*14*dt; e.y += Math.sin(a)*14*dt;
+          if (e._auraCd <= 0) {
+            e._auraCd = tick;
+            e.hp -= hit; e.hitFlash = 0.05; addDamage(e.x, e.y, hit, '#bef264');
+            if (e.hp <= 0) { const before = kills; killEnemy(e); if (evo && kills > before) player.hp = Math.min(player.maxhp, player.hp + 2); }
+          }
+        } else if (e._auraCd < 0) e._auraCd = 0;
+      }
+    }
+    // 성서 / 천국의 검
+    if (weaponLevel('orbit')) {
+      const lv = weaponLevel('orbit'), evo = isEvo('orbit');
+      const count = (evo ? 3 : 1) + Math.floor((lv+1)/2);
+      const radius = ((evo ? 95 : 70) + lv*6) * player.stats.area;
+      const dmg = (9+lv*4) * player.stats.dmg;
+      orbitAng += dt * (evo ? 4.6 : 3.2);
+      for (let i = 0; i < count; i++) {
+        const a = orbitAng + (i/count)*Math.PI*2;
+        const ox = player.x + Math.cos(a)*radius, oy = player.y + Math.sin(a)*radius;
+        for (const e of enemies) {
+          if (dist2(ox, oy, e.x, e.y) < (e.r+14)*(e.r+14) && e._orbitCd <= 0) {
+            e._orbitCd = 0.35; damageEnemy(e, dmg, { color: '#fde68a' });
+            const ka = Math.atan2(e.y-player.y, e.x-player.x); e.x += Math.cos(ka)*10; e.y += Math.sin(ka)*10;
+          }
+        }
+      }
+    }
+    for (const e of enemies) if (e._orbitCd > 0) e._orbitCd -= dt;
+  }
 
   function killEnemy(e) {
     const i = enemies.indexOf(e); if (i < 0) return;
     enemies.splice(i, 1); kills++;
-    gems.push({ x: e.x, y: e.y, xp: e.xp, r: 5, vx: 0, vy: 0 });
+    gems.push({ x: e.x, y: e.y, xp: e.xp, r: 5 });
     for (let p = 0; p < 6; p++) particles.push({ x: e.x, y: e.y, vx: rand(-120,120), vy: rand(-120,120), life: .4, r: rand(1.5,3.5), color: e.color });
   }
-
-  function addDamage(x, y, d) {
-    damageTexts.push({ x: x + rand(-6,6), y: y - 6, txt: Math.round(d), life: .6, vy: -40 });
+  function addDamage(x, y, d, color) {
+    damageTexts.push({ x: x + rand(-6,6), y: y - 6, txt: Math.round(d), life: .6, vy: -40, color: color || '#fff' });
   }
 
-  // ---------- XP / level ----------
+  // ---------- XP ----------
   function gainXP(n) {
     player.xp += n;
     while (player.xp >= player.xpNeed) {
       player.xp -= player.xpNeed;
       player.level++;
-      player.xpNeed = Math.floor(5 + player.level * 3.2 + player.level*player.level*0.35);
+      player.xpNeed = Math.floor(4 + player.level*2 + player.level*player.level*0.18); // 더 완만 = 빠른 레벨업
       openLevelUp();
     }
   }
 
-  // ---------- Input: drag-to-move joystick ----------
+  // ---------- Input ----------
   const input = { active: false, dx: 0, dy: 0, ox: 0, oy: 0 };
   const stickEl = document.getElementById('stick');
   const knobEl = document.getElementById('knob');
-  let lastMoveAng = 0;
 
   function pointerStart(x, y) {
     if (state !== 'play') return;
     input.active = true; input.ox = x; input.oy = y; input.dx = 0; input.dy = 0;
     stickEl.style.display = 'block';
-    stickEl.style.left = (x - 65) + 'px'; stickEl.style.top = (y - 65) + 'px';
+    stickEl.style.left = (x-65)+'px'; stickEl.style.top = (y-65)+'px';
     knobEl.style.left = '36px'; knobEl.style.top = '36px';
     document.getElementById('hint').style.display = 'none';
   }
   function pointerMove(x, y) {
     if (!input.active) return;
-    let dx = x - input.ox, dy = y - input.oy;
-    const len = Math.hypot(dx, dy);
-    const max = 55;
+    let dx = x-input.ox, dy = y-input.oy; const len = Math.hypot(dx, dy); const max = 55;
     if (len > max) { dx = dx/len*max; dy = dy/len*max; }
-    input.dx = dx / max; input.dy = dy / max;
-    knobEl.style.left = (36 + dx) + 'px'; knobEl.style.top = (36 + dy) + 'px';
+    input.dx = dx/max; input.dy = dy/max;
+    knobEl.style.left = (36+dx)+'px'; knobEl.style.top = (36+dy)+'px';
   }
-  function pointerEnd() {
-    input.active = false; input.dx = 0; input.dy = 0;
-    stickEl.style.display = 'none';
-  }
+  function pointerEnd() { input.active = false; input.dx = 0; input.dy = 0; stickEl.style.display = 'none'; }
 
   canvas.addEventListener('touchstart', e => { e.preventDefault(); const t = e.changedTouches[0]; pointerStart(t.clientX, t.clientY); }, { passive: false });
   canvas.addEventListener('touchmove',  e => { e.preventDefault(); const t = e.changedTouches[0]; pointerMove(t.clientX, t.clientY); }, { passive: false });
   canvas.addEventListener('touchend',   e => { e.preventDefault(); pointerEnd(); }, { passive: false });
   canvas.addEventListener('touchcancel',e => { e.preventDefault(); pointerEnd(); }, { passive: false });
-  // Mouse (desktop testing)
   let mouseDown = false;
   canvas.addEventListener('mousedown', e => { mouseDown = true; pointerStart(e.clientX, e.clientY); });
   canvas.addEventListener('mousemove', e => { if (mouseDown) pointerMove(e.clientX, e.clientY); });
   window.addEventListener('mouseup', () => { mouseDown = false; pointerEnd(); });
-  // Keyboard (desktop testing)
   const keys = {};
   window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
   window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
@@ -392,56 +480,44 @@
   // ---------- Update ----------
   function update(dt) {
     time += dt;
-
-    // movement
     let mx = input.dx, my = input.dy;
     if (keys['arrowup']||keys['w']) my = -1;
     if (keys['arrowdown']||keys['s']) my = 1;
     if (keys['arrowleft']||keys['a']) mx = -1;
     if (keys['arrowright']||keys['d']) mx = 1;
-    const ml = Math.hypot(mx, my);
-    if (ml > 1) { mx /= ml; my /= ml; }
-    if (ml > 0.05) lastMoveAng = Math.atan2(my, mx);
+    const ml = Math.hypot(mx, my); if (ml > 1) { mx /= ml; my /= ml; }
+    if (Math.abs(mx) > 0.1) player.facing = mx > 0 ? 1 : -1;
     const sp = player.speed * player.stats.movespeed;
-    player.x += mx * sp * dt;
-    player.y += my * sp * dt;
-
-    // camera follows
+    player.x += mx*sp*dt; player.y += my*sp*dt;
     cam.x = player.x - W/2; cam.y = player.y - H/2;
 
-    // regen
-    if (player.regen > 0 && player.hp < player.maxhp) player.hp = Math.min(player.maxhp, player.hp + player.regen * dt);
+    if (player.regen > 0 && player.hp < player.maxhp) player.hp = Math.min(player.maxhp, player.hp + player.regen*dt);
     if (player.iframe > 0) player.iframe -= dt;
+    if (banner) { banner.life -= dt; if (banner.life <= 0) banner = null; }
 
-    // spawn
-    spawnAcc += spawnRate() * dt;
+    spawnAcc += spawnRate()*dt;
     while (spawnAcc >= 1) { spawnAcc -= 1; spawnEnemy(); if (enemies.length > 300) break; }
 
-    // enemies move toward player + separation-ish
     for (const e of enemies) {
-      const a = Math.atan2(player.y - e.y, player.x - e.x);
-      e.x += Math.cos(a) * e.speed * dt;
-      e.y += Math.sin(a) * e.speed * dt;
+      const a = Math.atan2(player.y-e.y, player.x-e.x);
+      const spd = e.slowT > 0 ? e.speed*0.4 : e.speed;
+      if (e.slowT > 0) e.slowT -= dt;
+      e.x += Math.cos(a)*spd*dt; e.y += Math.sin(a)*spd*dt;
       if (e.hitFlash > 0) e.hitFlash -= dt;
-      // collide with player
       const rr = e.r + player.r;
-      if (dist2(e.x, e.y, player.x, player.y) < rr*rr) {
-        if (player.iframe <= 0) {
-          player.hp -= e.dmg; player.iframe = 0.5;
-          for (let p = 0; p < 6; p++) particles.push({ x: player.x, y: player.y, vx: rand(-100,100), vy: rand(-100,100), life: .3, r: rand(1,3), color: '#ff5a5a' });
-          if (player.hp <= 0) { player.hp = 0; gameOver(); return; }
-        }
+      if (dist2(e.x, e.y, player.x, player.y) < rr*rr && player.iframe <= 0) {
+        player.hp -= e.dmg; player.iframe = 0.5;
+        for (let p = 0; p < 6; p++) particles.push({ x: player.x, y: player.y, vx: rand(-100,100), vy: rand(-100,100), life: .3, r: rand(1,3), color: '#ff5a5a' });
+        if (player.hp <= 0) { player.hp = 0; gameOver(); return; }
       }
     }
-    // simple enemy separation to avoid full overlap
+    // separation
     for (let i = 0; i < enemies.length; i++) {
       for (let j = i+1; j < enemies.length; j++) {
         const a = enemies[i], b = enemies[j];
-        const dx = b.x - a.x, dy = b.y - a.y; const rr = a.r + b.r;
-        const d2 = dx*dx + dy*dy;
+        const dx = b.x-a.x, dy = b.y-a.y, rr = a.r+b.r, d2 = dx*dx+dy*dy;
         if (d2 < rr*rr && d2 > 0.01) {
-          const d = Math.sqrt(d2); const push = (rr - d) * 0.5;
-          const nx = dx/d, ny = dy/d;
+          const d = Math.sqrt(d2), push = (rr-d)*0.5, nx = dx/d, ny = dy/d;
           a.x -= nx*push; a.y -= ny*push; b.x += nx*push; b.y += ny*push;
         }
       }
@@ -450,162 +526,196 @@
     fireWeapons(dt);
     updateContinuousWeapons(dt);
 
-    // bullets
-    for (let i = bullets.length - 1; i >= 0; i--) {
+    for (let i = bullets.length-1; i >= 0; i--) {
       const b = bullets[i];
-      b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
+      if (b.grav) b.vy += b.grav*dt;
+      b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt;
+      if (b.spinv) b.spin += b.spinv*dt;
       let dead = b.life <= 0;
       for (const e of enemies) {
         if (b.hits.includes(e)) continue;
         const rr = e.r + b.r;
         if (dist2(b.x, b.y, e.x, e.y) < rr*rr) {
-          e.hp -= b.dmg; e.hitFlash = 0.1; b.hits.push(e); addDamage(e.x, e.y, b.dmg);
-          if (e.hp <= 0) killEnemy(e);
-          b.pierce--;
-          if (b.pierce <= 0) { dead = true; break; }
+          b.hits.push(e);
+          damageEnemy(e, b.dmg, { slow: b.slow, color: b.kind === 'frost' ? '#7dd3fc' : '#fff' });
+          if (--b.pierce <= 0) { dead = true; break; }
         }
       }
       if (dead) bullets.splice(i, 1);
     }
 
-    // gems - magnet & pickup
     const pick = player.pickup;
-    for (let i = gems.length - 1; i >= 0; i--) {
+    for (let i = gems.length-1; i >= 0; i--) {
       const g = gems[i];
       const d2 = dist2(g.x, g.y, player.x, player.y);
       if (d2 < pick*pick) {
-        const a = Math.atan2(player.y - g.y, player.x - g.x);
+        const a = Math.atan2(player.y-g.y, player.x-g.x);
         const pull = 260 + (pick - Math.sqrt(d2));
-        g.x += Math.cos(a) * pull * dt; g.y += Math.sin(a) * pull * dt;
+        g.x += Math.cos(a)*pull*dt; g.y += Math.sin(a)*pull*dt;
       }
-      if (d2 < (player.r + 6)*(player.r + 6)) { gainXP(g.xp); gems.splice(i, 1); }
+      if (d2 < (player.r+6)*(player.r+6)) { gainXP(g.xp); gems.splice(i, 1); }
     }
 
-    // particles / damage text
-    for (let i = particles.length - 1; i >= 0; i--) {
+    for (let i = particles.length-1; i >= 0; i--) {
       const p = particles[i]; p.x += p.vx*dt; p.y += p.vy*dt; p.vx *= 0.92; p.vy *= 0.92; p.life -= dt;
       if (p.life <= 0) particles.splice(i, 1);
     }
-    for (let i = damageTexts.length - 1; i >= 0; i--) {
+    for (let i = damageTexts.length-1; i >= 0; i--) {
       const d = damageTexts[i]; d.y += d.vy*dt; d.vy *= 0.9; d.life -= dt;
       if (d.life <= 0) damageTexts.splice(i, 1);
     }
+    for (let i = lightnings.length-1; i >= 0; i--) { lightnings[i].life -= dt; if (lightnings[i].life <= 0) lightnings.splice(i, 1); }
+    for (let i = slashes.length-1; i >= 0; i--) { slashes[i].life -= dt; if (slashes[i].life <= 0) slashes.splice(i, 1); }
 
     updateHUD();
   }
 
   // ---------- Render ----------
+  function jaggedBolt(x1, y1, x2, y2, seg) {
+    ctx.beginPath(); ctx.moveTo(x1, y1);
+    for (let i = 1; i < seg; i++) {
+      const t = i/seg;
+      ctx.lineTo(x1 + (x2-x1)*t + rand(-14,14), y1 + (y2-y1)*t + rand(-6,6));
+    }
+    ctx.lineTo(x2, y2); ctx.stroke();
+  }
+
   function draw() {
-    // background grid
-    ctx.fillStyle = '#0c0c16';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#0c0c16'; ctx.fillRect(0, 0, W, H);
     const grid = 60;
-    ctx.strokeStyle = 'rgba(255,255,255,0.045)'; ctx.lineWidth = 1;
-    ctx.beginPath();
-    const startX = -((cam.x % grid) + grid) % grid;
-    const startY = -((cam.y % grid) + grid) % grid;
-    for (let x = startX; x < W; x += grid) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
-    for (let y = startY; y < H; y += grid) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.strokeStyle = 'rgba(255,255,255,0.045)'; ctx.lineWidth = 1; ctx.beginPath();
+    const sx = -((cam.x%grid)+grid)%grid, sy = -((cam.y%grid)+grid)%grid;
+    for (let x = sx; x < W; x += grid) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = sy; y < H; y += grid) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
     ctx.stroke();
 
-    ctx.save();
-    ctx.translate(-cam.x, -cam.y);
+    ctx.save(); ctx.translate(-cam.x, -cam.y);
 
-    // gems
     for (const g of gems) {
       ctx.fillStyle = g.xp >= 5 ? '#f0abfc' : g.xp >= 2 ? '#fde047' : '#67e8f9';
-      ctx.beginPath();
-      ctx.moveTo(g.x, g.y - 5); ctx.lineTo(g.x + 4, g.y); ctx.lineTo(g.x, g.y + 5); ctx.lineTo(g.x - 4, g.y);
-      ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(g.x, g.y-5); ctx.lineTo(g.x+4, g.y); ctx.lineTo(g.x, g.y+5); ctx.lineTo(g.x-4, g.y); ctx.closePath(); ctx.fill();
     }
 
-    // aura visual
+    // aura
     if (weaponLevel('aura')) {
-      const lv = weaponLevel('aura');
-      const range = (55 + lv*14) * player.stats.area;
-      ctx.fillStyle = 'rgba(180,255,140,0.08)';
+      const lv = weaponLevel('aura'), evo = isEvo('aura');
+      const range = ((evo ? 90 : 55) + lv*14) * player.stats.area;
+      ctx.fillStyle = evo ? 'rgba(190,242,100,0.10)' : 'rgba(180,255,140,0.08)';
       ctx.beginPath(); ctx.arc(player.x, player.y, range, 0, Math.PI*2); ctx.fill();
-      ctx.strokeStyle = 'rgba(180,255,140,0.22)'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.strokeStyle = 'rgba(190,242,100,0.25)'; ctx.lineWidth = 2; ctx.stroke();
+    }
+
+    // frost slowed ring
+    for (const e of enemies) {
+      if (e.slowT > 0) { ctx.strokeStyle = 'rgba(125,211,252,0.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(e.x, e.y, e.r+3, 0, Math.PI*2); ctx.stroke(); }
     }
 
     // enemies
     for (const e of enemies) {
-      ctx.fillStyle = e.hitFlash > 0 ? '#ffffff' : e.color;
+      ctx.fillStyle = e.hitFlash > 0 ? '#fff' : e.color;
       ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI*2); ctx.fill();
-      // eyes
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.beginPath(); ctx.arc(e.x - e.r*0.32, e.y - e.r*0.15, e.r*0.16, 0, Math.PI*2);
-      ctx.arc(e.x + e.r*0.32, e.y - e.r*0.15, e.r*0.16, 0, Math.PI*2); ctx.fill();
-      // hp bar if damaged
+      ctx.beginPath(); ctx.arc(e.x-e.r*0.32, e.y-e.r*0.15, e.r*0.16, 0, Math.PI*2); ctx.arc(e.x+e.r*0.32, e.y-e.r*0.15, e.r*0.16, 0, Math.PI*2); ctx.fill();
       if (e.hp < e.maxhp) {
-        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(e.x - e.r, e.y - e.r - 7, e.r*2, 3);
-        ctx.fillStyle = '#7ef17e'; ctx.fillRect(e.x - e.r, e.y - e.r - 7, e.r*2 * (e.hp/e.maxhp), 3);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(e.x-e.r, e.y-e.r-7, e.r*2, 3);
+        ctx.fillStyle = '#7ef17e'; ctx.fillRect(e.x-e.r, e.y-e.r-7, e.r*2*(e.hp/e.maxhp), 3);
       }
     }
 
-    // orbit visual
+    // whip slashes
+    for (const s of slashes) {
+      const al = Math.min(1, s.life/0.18);
+      ctx.globalAlpha = al * 0.55;
+      const grd = ctx.createLinearGradient(s.x, s.y, s.x + s.len*s.dir, s.y);
+      grd.addColorStop(0, s.evo ? 'rgba(248,113,113,0.9)' : 'rgba(255,255,255,0.9)');
+      grd.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.moveTo(s.x, s.y - s.h/2); ctx.lineTo(s.x + s.len*s.dir, s.y - s.h*0.15);
+      ctx.lineTo(s.x + s.len*s.dir, s.y + s.h*0.15); ctx.lineTo(s.x, s.y + s.h/2); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // orbit
     if (weaponLevel('orbit')) {
-      const lv = weaponLevel('orbit');
-      const count = 1 + Math.floor((lv+1)/2);
-      const radius = (70 + lv*6) * player.stats.area;
+      const lv = weaponLevel('orbit'), evo = isEvo('orbit');
+      const count = (evo ? 3 : 1) + Math.floor((lv+1)/2);
+      const radius = ((evo ? 95 : 70) + lv*6) * player.stats.area;
+      ctx.font = (evo ? '26px' : '22px') + ' serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       for (let i = 0; i < count; i++) {
-        const a = orbitAng + (i / count) * Math.PI * 2;
-        const ox = player.x + Math.cos(a)*radius, oy = player.y + Math.sin(a)*radius;
-        ctx.font = '22px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('📖', ox, oy);
+        const a = orbitAng + (i/count)*Math.PI*2;
+        ctx.fillText(evo ? '⚔️' : '📖', player.x + Math.cos(a)*radius, player.y + Math.sin(a)*radius);
       }
     }
 
     // bullets
     for (const b of bullets) {
-      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(Math.atan2(b.vy, b.vx));
-      ctx.fillStyle = b.color;
-      ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-6, -4); ctx.lineTo(-6, 4); ctx.closePath(); ctx.fill();
+      ctx.save(); ctx.translate(b.x, b.y);
+      if (b.kind === 'axe') {
+        ctx.rotate(b.spin); ctx.font = (b.r*2)+'px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🪓', 0, 0);
+      } else if (b.kind === 'frost') {
+        ctx.fillStyle = '#7dd3fc'; ctx.shadowColor = '#7dd3fc'; ctx.shadowBlur = 8;
+        ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+      } else {
+        ctx.rotate(Math.atan2(b.vy, b.vx)); ctx.fillStyle = b.color;
+        ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-6, -4); ctx.lineTo(-6, 4); ctx.closePath(); ctx.fill();
+      }
       ctx.restore();
     }
 
-    // particles
-    for (const p of particles) {
-      ctx.globalAlpha = Math.max(0, p.life * 2.2); ctx.fillStyle = p.color;
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+    // lightning
+    for (const l of lightnings) {
+      const al = Math.min(1, l.life/0.28);
+      ctx.globalAlpha = al;
+      ctx.strokeStyle = '#e0f2fe'; ctx.lineWidth = 3; ctx.shadowColor = '#38bdf8'; ctx.shadowBlur = 16;
+      const topX = l.sx !== undefined ? l.sx : l.x + rand(-30,30);
+      const topY = l.sy !== undefined ? l.sy : l.y - (H*0.7);
+      jaggedBolt(topX, topY, l.x, l.y, 8);
+      ctx.lineWidth = 1.2; ctx.strokeStyle = '#fff'; jaggedBolt(topX, topY, l.x, l.y, 8);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(165,243,252,' + (al*0.5) + ')';
+      ctx.beginPath(); ctx.arc(l.x, l.y, 22*al+6, 0, Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 1;
     }
+
+    // particles
+    for (const p of particles) { ctx.globalAlpha = Math.max(0, p.life*2.2); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill(); }
     ctx.globalAlpha = 1;
 
     // player
     ctx.fillStyle = player.iframe > 0 && Math.floor(time*20)%2 ? '#ffb0b0' : '#c084fc';
     ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(player.x - 5, player.y - 3, 3, 0, Math.PI*2); ctx.arc(player.x + 5, player.y - 3, 3, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#000';
-    ctx.beginPath(); ctx.arc(player.x - 5, player.y - 3, 1.4, 0, Math.PI*2); ctx.arc(player.x + 5, player.y - 3, 1.4, 0, Math.PI*2); ctx.fill();
-    // player hp ring
-    ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 5, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(player.x-5, player.y-3, 3, 0, Math.PI*2); ctx.arc(player.x+5, player.y-3, 3, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(player.x-5+player.facing, player.y-3, 1.4, 0, Math.PI*2); ctx.arc(player.x+5+player.facing, player.y-3, 1.4, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(player.x, player.y, player.r+5, 0, Math.PI*2); ctx.stroke();
     ctx.strokeStyle = player.hp/player.maxhp > 0.3 ? '#4ade80' : '#f87171'; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 5, -Math.PI/2, -Math.PI/2 + Math.PI*2*(player.hp/player.maxhp)); ctx.stroke();
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r+5, -Math.PI/2, -Math.PI/2 + Math.PI*2*(player.hp/player.maxhp)); ctx.stroke();
 
     // damage text
     ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
-    for (const d of damageTexts) {
-      ctx.globalAlpha = Math.min(1, d.life*2); ctx.fillStyle = '#fff';
-      ctx.fillText(d.txt, d.x, d.y);
-    }
+    for (const d of damageTexts) { ctx.globalAlpha = Math.min(1, d.life*2); ctx.fillStyle = d.color; ctx.fillText(d.txt, d.x, d.y); }
     ctx.globalAlpha = 1;
 
     ctx.restore();
+
+    // evolution banner (screen space)
+    if (banner) {
+      const al = Math.min(1, banner.life);
+      ctx.globalAlpha = al; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = 'bold ' + Math.min(34, W*0.075) + 'px sans-serif';
+      ctx.fillStyle = '#000'; ctx.fillText(banner.txt, W/2+2, H*0.24+2);
+      ctx.fillStyle = '#fbbf24'; ctx.shadowColor = '#f59e0b'; ctx.shadowBlur = 20; ctx.fillText(banner.txt, W/2, H*0.24); ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
   }
 
   // ---------- HUD ----------
-  const elLvl = document.getElementById('lvl');
-  const elTimer = document.getElementById('timer');
-  const elKills = document.getElementById('kills');
-  const elXp = document.getElementById('xpfill');
+  const elLvl = document.getElementById('lvl'), elTimer = document.getElementById('timer');
+  const elKills = document.getElementById('kills'), elXp = document.getElementById('xpfill');
   function updateHUD() {
     elLvl.textContent = 'Lv ' + player.level;
-    const m = Math.floor(time/60), s = Math.floor(time%60);
-    elTimer.textContent = m + ':' + String(s).padStart(2, '0');
+    elTimer.textContent = fmtTime(time);
     elKills.textContent = '☠ ' + kills;
-    elXp.style.width = (100 * player.xp / player.xpNeed) + '%';
+    elXp.style.width = (100*player.xp/player.xpNeed) + '%';
   }
 
   // ---------- Screens ----------
@@ -614,34 +724,36 @@
   const gameoverScreen = document.getElementById('gameover');
   const cardsEl = document.getElementById('cards');
 
+  function refreshBestLabels() {
+    const b = getBest();
+    document.getElementById('bestStart').textContent = b > 0 ? '🏆 최고 생존 ' + fmtTime(b) : '';
+  }
+
   function openLevelUp() {
     state = 'levelup';
     const choices = upgradeChoices();
     cardsEl.innerHTML = '';
     for (const c of choices) {
       const div = document.createElement('div');
-      div.className = 'card';
-      const lvTxt = c.type === 'weapon' || c.type === 'passive'
-        ? (c.lv > 0 ? 'Lv ' + (c.lv+1) : '신규') : '';
-      div.innerHTML = `<div class="ico">${c.icon}</div>
-        <div class="txt"><h3>${c.name}</h3><p>${c.desc}</p></div>
-        <div class="lv">${lvTxt}</div>`;
+      div.className = 'card' + (c.evo ? ' evo' : '');
+      const lvTxt = c.evo ? '진화' : (c.type === 'weapon' || c.type === 'passive' ? (c.lv > 0 ? 'Lv ' + (c.lv+1) : '신규') : '');
+      div.innerHTML = '<div class="ico">'+c.icon+'</div><div class="txt"><h3>'+c.name+'</h3><p>'+c.desc+'</p></div><div class="lv">'+lvTxt+'</div>';
       div.addEventListener('click', () => { applyChoice(c); closeLevelUp(); });
       cardsEl.appendChild(div);
     }
     levelupScreen.classList.remove('hidden');
   }
-  function closeLevelUp() {
-    levelupScreen.classList.add('hidden');
-    if (state === 'levelup') state = 'play';
-  }
+  function closeLevelUp() { levelupScreen.classList.add('hidden'); if (state === 'levelup') state = 'play'; }
 
   function gameOver() {
     state = 'dead';
-    const m = Math.floor(time/60), s = Math.floor(time%60);
+    const best = getBest(); const isNew = time > best;
+    if (isNew) setBest(time);
     document.getElementById('goStats').innerHTML =
-      `생존 시간 <b style="color:#fde68a">${m}:${String(s).padStart(2,'0')}</b><br>` +
-      `처치 <b style="color:#fca5a5">${kills}</b> · 레벨 <b style="color:#93c5fd">${player.level}</b>`;
+      '생존 시간 <b style="color:#fde68a">'+fmtTime(time)+'</b><br>처치 <b style="color:#fca5a5">'+kills+'</b> · 레벨 <b style="color:#93c5fd">'+player.level+'</b>';
+    document.getElementById('bestGO').innerHTML = isNew
+      ? '🎉 <span style="color:#4ade80">신기록!</span> 이전 최고 ' + (best>0?fmtTime(best):'없음')
+      : '🏆 최고 생존 ' + fmtTime(best);
     gameoverScreen.classList.remove('hidden');
     document.getElementById('hint').style.display = 'none';
     stickEl.style.display = 'none';
@@ -649,9 +761,7 @@
 
   function startGame() {
     reset();
-    startScreen.classList.add('hidden');
-    gameoverScreen.classList.add('hidden');
-    levelupScreen.classList.add('hidden');
+    startScreen.classList.add('hidden'); gameoverScreen.classList.add('hidden'); levelupScreen.classList.add('hidden');
     state = 'play';
     document.getElementById('hint').style.display = 'block';
     updateHUD();
@@ -659,12 +769,12 @@
 
   document.getElementById('startBtn').addEventListener('click', startGame);
   document.getElementById('retryBtn').addEventListener('click', startGame);
+  refreshBestLabels();
 
-  // ---------- Main loop ----------
+  // ---------- Loop ----------
   let last = performance.now();
   function loop(now) {
-    let dt = (now - last) / 1000; last = now;
-    if (dt > 0.05) dt = 0.05; // clamp
+    let dt = (now-last)/1000; last = now; if (dt > 0.05) dt = 0.05;
     if (state === 'play') update(dt);
     if (state === 'play' || state === 'levelup' || state === 'dead') draw();
     requestAnimationFrame(loop);
